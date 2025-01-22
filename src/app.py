@@ -1,108 +1,82 @@
-# pip install streamlit langchain langchain-openai beautifulsoup4 python-dotenv chromadb
-
 import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_community.document_loaders import WebBaseLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from datetime import datetime
 
+# ตั้งค่าหน้าเพจ
+st.set_page_config(
+    page_title="Simple Chatbot",
+    page_icon="🤖"
+)
 
-load_dotenv()
+# ฟังก์ชันสำหรับประมวลผลข้อความและส่งคำตอบกลับ
+def get_bot_response(user_input):
+    # ตัวอย่างการตอบกลับแบบง่าย
+    responses = {
+        "สวัสดี": "สวัสดีครับ! มีอะไรให้ช่วยไหมครับ?",
+        "ชื่ออะไร": "ผมชื่อ ChatBot ครับ ยินดีที่ได้รู้จัก",
+        "ขอบคุณ": "ด้วยความยินดีครับ",
+        "ลาก่อน": "แล้วเจอกันใหม่นะครับ!"
+    }
+    
+    # ตรวจสอบคำสำคัญในข้อความ
+    for key in responses:
+        if key in user_input.lower():
+            return responses[key]
+    
+    return "ขอโทษครับ ผมไม่เข้าใจคำถาม กรุณาถามใหม่อีกครั้ง"
 
-def get_vectorstore_from_url(url):
-    # get the text in document form
-    loader = WebBaseLoader(url)
-    document = loader.load()
-    
-    # split the document into chunks
-    text_splitter = RecursiveCharacterTextSplitter()
-    document_chunks = text_splitter.split_documents(document)
-    
-    # create a vectorstore from the chunks
-    vector_store = Chroma.from_documents(document_chunks, OpenAIEmbeddings())
+# สร้าง session state สำหรับเก็บประวัติการสนทนา
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
-    return vector_store
+# ส่วนหัวของแอพ
+st.title("🤖 Simple Chatbot")
+st.write("คุยกับผมได้เลยครับ!")
 
-def get_context_retriever_chain(vector_store):
-    llm = ChatOpenAI()
-    
-    retriever = vector_store.as_retriever()
-    
-    prompt = ChatPromptTemplate.from_messages([
-      MessagesPlaceholder(variable_name="chat_history"),
-      ("user", "{input}"),
-      ("user", "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation")
-    ])
-    
-    retriever_chain = create_history_aware_retriever(llm, retriever, prompt)
-    
-    return retriever_chain
-    
-def get_conversational_rag_chain(retriever_chain): 
-    
-    llm = ChatOpenAI()
-    
-    prompt = ChatPromptTemplate.from_messages([
-      ("system", "Answer the user's questions based on the below context:\n\n{context}"),
-      MessagesPlaceholder(variable_name="chat_history"),
-      ("user", "{input}"),
-    ])
-    
-    stuff_documents_chain = create_stuff_documents_chain(llm,prompt)
-    
-    return create_retrieval_chain(retriever_chain, stuff_documents_chain)
+# ส่วนรับข้อความจากผู้ใช้
+user_input = st.chat_input("พิมพ์ข้อความของคุณที่นี่:")
 
-def get_response(user_input):
-    retriever_chain = get_context_retriever_chain(st.session_state.vector_store)
-    conversation_rag_chain = get_conversational_rag_chain(retriever_chain)
-    
-    response = conversation_rag_chain.invoke({
-        "chat_history": st.session_state.chat_history,
-        "input": user_input
+# จัดการกับข้อความที่ได้รับ
+if user_input:
+    # เพิ่มข้อความผู้ใช้ลงในประวัติ
+    st.session_state.chat_history.append({
+        'role': 'user',
+        'message': user_input
     })
     
-    return response['answer']
+    # รับคำตอบจาก bot และเพิ่มลงในประวัติ
+    bot_response = get_bot_response(user_input)
+    st.session_state.chat_history.append({
+        'role': 'bot',
+        'message': bot_response
+    })
 
-# app config
-st.set_page_config(page_title="Chat with websites", page_icon="🤖")
-st.title("Chat with websites")
-
-# sidebar
-with st.sidebar:
-    st.header("Settings")
-    website_url = st.text_input("Website URL")
-
-if website_url is None or website_url == "":
-    st.info("Please enter a website URL")
-
-else:
-    # session state
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = [
-            AIMessage(content="Hello, I am a bot. How can I help you?"),
-        ]
-    if "vector_store" not in st.session_state:
-        st.session_state.vector_store = get_vectorstore_from_url(website_url)    
-
-    # user input
-    user_query = st.chat_input("Type your message here...")
-    if user_query is not None and user_query != "":
-        response = get_response(user_query)
-        st.session_state.chat_history.append(HumanMessage(content=user_query))
-        st.session_state.chat_history.append(AIMessage(content=response))
-        
-       
-
-    # conversation
+# ส่วนแสดงประวัติการสนทนา
+chat_container = st.container()
+with chat_container:
     for message in st.session_state.chat_history:
-        if isinstance(message, AIMessage):
-            with st.chat_message("AI"):
-                st.write(message.content)
-        elif isinstance(message, HumanMessage):
-            with st.chat_message("Human"):
-                st.write(message.content)
+        if message['role'] == 'user':
+            with st.chat_message("user"):
+                st.write(message['message'])
+        else:
+            with st.chat_message("assistant"):
+                st.write(message['message'])
+
+# เพิ่มปุ่มล้างประวัติการสนทนา
+if st.button("ล้างประวัติการสนทนา"):
+    st.session_state.chat_history = []
+    st.rerun()
+
+# แสดงคำแนะนำการใช้งาน
+with st.expander("วิธีใช้งาน"):
+    st.write("""
+    1. พิมพ์ข้อความที่ต้องการในช่องข้อความด้านล่าง
+    2. กด Enter เพื่อส่งข้อความ
+    3. Bot จะตอบกลับอัตโนมัติ
+    4. สามารถกดปุ่ม 'ล้างประวัติการสนทนา' เพื่อเริ่มต้นใหม่
+    
+    ตัวอย่างคำถามที่ Bot เข้าใจ:
+    - สวัสดี
+    - ชื่ออะไร
+    - ขอบคุณ
+    - ลาก่อน
+    """)
